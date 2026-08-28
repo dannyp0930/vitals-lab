@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__codex__codex",
+      "Bash(codex exec --json --sandbox read-only:*)",
+      "Bash(codex exec --json --sandbox workspace-write:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git remote:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git add -A:*)",
+      "Bash(git commit -m:*)",
+      "Bash(git mv:*)"
+    ]
+  },
+  "outputStyle": "Caveman Ponytail"
+}
