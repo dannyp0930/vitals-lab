@@ -15,6 +15,3 @@ models/*.task
 .claude/worktrees/
 .claude/memory/
 
-.codex/*
-!.codex/agents/
-!.codex/agents/*.toml

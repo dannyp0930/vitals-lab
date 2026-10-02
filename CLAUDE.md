@@ -4,7 +4,7 @@
 
 **제품 코드가 아니다.** 노트북 웹캠으로 심박수가 나오는지, 그 값이 신뢰할 만한지 한 달 안에 판단하는 것이 전부다. 이 성격이 아래 모든 규칙의 근거다.
 
-Claude Code는 구현과 초안을 맡고, Codex는 코드 리뷰와 커밋 게이트를 맡는다. 공통 규칙은 이 문서다.
+Claude Code가 구현, 검증, 문서를 전부 맡는다. 외부 리뷰어는 없다. 통제는 사용자 승인 하나뿐이며 그 사실이 아래 규칙의 전제다.
 
 ## 0. 시작할 때: 작업 등급부터 정한다
 
@@ -32,6 +32,7 @@ Claude Code는 구현과 초안을 맡고, Codex는 코드 리뷰와 커밋 게�
 | `.venv/Scripts/python.exe test_pipeline.py`     | 합성 신호로 Stage 3~5 검증. `S` 기본            |
 | 웹캠 실측                                       | 실제 얼굴에서 BPM·SNR·fps 관측. `M/L` 기본      |
 | `.venv/Scripts/python.exe camera_test.py`       | 카메라 설정별 신호 품질 비교. 카메라 작업일 때  |
+| `.venv/Scripts/python.exe stats.py`             | `logs/`에서 `README.md`용 표 생성. 문서 갱신 전 필수 |
 
 - 보고할 때 위 이름을 그대로 쓴다.
 - 실행하지 못했으면 `not-run`, 실패했으면 `fail`로 쓴다. 성공으로 반올림하지 않는다.
@@ -64,20 +65,33 @@ Apple Watch 대조, 계단 오르내리기 추종성, 사진 공격 sanity check
 3. 검증 결과: test_pipeline.py = pass/fail/not-run
    웹캠 실측: BPM, SNR, fps, 얼굴 검출률, 또는 not-run
 4. 미확정 가정: 추측으로 결정한 것. 없으면 "없음"
-5. 리뷰 질문: Codex가 확인해야 할 것. 없으면 "없음"
+5. 리뷰 질문: 사용자가 판단해야 할 것. 없으면 "없음"
 ```
 
 문서를 만드는 기준은 "누가 언제 다시 읽는가"다. 이번 chat에서 소비되고 끝나는 내용은 문서로 만들지 않는다. 진행 로그와 완료 보고서는 만들지 않는다. **실측으로 알아낸 카메라 특성, 파라미터별 신호 품질, 게이트 진행 상황은 `README.md`에 쌓는다.** 그것이 Phase 0의 실제 산출물이다.
 
-## 3. Claude x Codex 협업
+## 3. 커밋 게이트
 
-- **커밋 게이트는 판단과 실행을 나눈다.** Codex가 `read-only`로 커밋 계획(묶음별 경로와 Conventional Commits 메시지)을 판단하고, Claude가 그 계획대로 `git add -A`와 `git commit`을 실행한다. 무엇을 어떤 메시지로 커밋할지는 Codex가 정하며 Claude는 계획을 바꾸지 않는다.
-- 이렇게 나눈 이유는 Windows 환경에서 Codex 샌드박스가 `.git` 쓰기를 거부하기 때문이다. `workspace-write`로 올려도 `git add`가 `fatal: Unable to create '.../.git/index.lock': Permission denied`로 실패한다. 실측 근거는 `round` 스킬에 있다.
-- 커밋 계획 없이 Claude가 임의로 커밋하지 않는다. Codex 계획을 받지 못했으면 closeout 5개만 남기고 멈춘다.
-- **`push`는 자동화하지 않는다.** 커밋 승인은 push 승인이 아니다. push는 사용자가 이번 턴에 명시적으로 승인했을 때만 한다.
-- Codex 리뷰와 커밋 계획은 항상 `sandbox: "read-only"`로 호출한다. `workspace-write`는 **`AGENTS.md` 수정에만** 쓴다. `.codex/**`는 Codex 소유지만 Codex 샌드박스가 그 경로 쓰기를 거부하므로 Codex가 전문을 작성하고 Claude가 기록한다. 아래 "파일 소유"를 본다.
-- `cwd`는 항상 `D:/workspace/vitals-lab`로 고정한다. **그리고 전역 `~/.codex/config.toml`에 이 저장소가 `trust_level = "trusted"`로 등록되어 있어야 한다.** 등록되지 않으면 전역 설정 모델로 떨어져 400으로 죽는다. 등록 방법과 증상은 `round` 스킬에 있다.
-- 절차는 `round` 스킬에 있다. Codex 리뷰를 받으면서 진행해야 하는 작업이면 그 스킬을 쓴다.
+- **커밋은 사용자가 이번 턴에 명시적으로 승인했을 때만 한다.** 외부 리뷰어가 없으므로 이것이 유일한 통제다.
+- 승인을 받으면 커밋 범위와 메시지를 먼저 chat에 적는다. 사용자가 범위를 보고 멈출 수 있어야 한다.
+- `git add -A -- <경로들>`를 쓴다. 삭제된 경로에 `git add -- <path>`를 쓰면 `fatal: pathspec ... did not match any files`로 실패한다.
+- 커밋 직전에 `git diff --cached -M --stat`으로 staged 범위를 확인한다. 예상과 다르면 커밋하지 않고 보고한다.
+- `.venv/`, `logs/`, `models/*.task`, `.env`가 staged에 보이면 커밋하지 않고 보고한다.
+- 커밋 전에 `git config user.email`이 개인 주소인지 확인한다. 아래 "저장소 경계"를 본다.
+- **`push`는 자동화하지 않는다.** 커밋 승인은 push 승인이 아니다. push는 사용자가 이번 턴에 명시적으로 승인했을 때만 한다. PR 생성은 push 승인에 포함되지 않는다.
+- 커밋 후 브랜치와 커밋 해시를 보고한다.
+
+### 리뷰어가 없으므로 수치를 손으로 옮기지 않는다
+
+이전에는 Codex가 리뷰를 맡았다. 실제로 잡힌 결함 7건 중 5건이 **CSV 수치를 손으로 `README.md`에 옮기다 생긴 오류**였다. 표본 수 누락, 집계 기준 혼용(`elapsed_s` vs timestamp span), 무효 세션 합산, 전체에 적용되지 않는 규칙의 일반화 같은 것이다.
+
+그 그물이 사라졌으므로 규칙을 바꾼다.
+
+- **`README.md` 실측 표의 숫자는 `stats.py` 출력을 그대로 붙인다.** 손으로 계산하거나 옮겨 적지 않는다.
+- 새 세션이 생기면 `stats.py`를 다시 돌려 표 전체를 교체한다. 일부만 고치지 않는다. 분모가 함께 바뀐다.
+- `stats.py`가 내지 못하는 값(조건 설명, 무효 사유, 해석)만 손으로 쓴다.
+- 무효 세션은 `stats.py`의 `INVALID_SESSIONS` 상수에 적는다. 문서에만 적지 않는다.
+- 집계 기준을 바꿔야 하면 `stats.py`를 고친다. 문서에서 다르게 계산하지 않는다.
 
 ## 4. 저장소 경계
 
@@ -137,16 +151,10 @@ Apple Watch 대조, 계단 오르내리기 추종성, 사진 공격 sanity check
 
 | 파일 | 내용을 정하는 쪽 | 파일에 쓰는 쪽 |
 | --- | --- | --- |
-| `CLAUDE.md`, `.claude/**`, `.mcp.json` | Claude | Claude |
-| `AGENTS.md` | Codex | Codex |
-| `.codex/**` | Codex | **Claude** |
+| `CLAUDE.md`, `.claude/**` | Claude | Claude |
 | `HANDOFF.md` | 사용자 | 사용자 |
 | `README.md`, `*.py` | Claude (사용자 승인 하에) | Claude |
 
-**`.codex/**`는 소유와 쓰기가 갈린다.** Codex 샌드박스가 `.codex/` 쓰기를 거부하기 때문이다. `.git`과 같은 자기보호 경로다. 그래서 Codex가 파일 전문을 텍스트로 작성하고 Claude가 그대로 기록한다. **Claude는 내용을 고치지 않는다.**
+**`HANDOFF.md`는 사용자가 준 사양이다.** 도구가 고치지 않는다. 실측으로 사양과 다른 사실이 나오면 `README.md`에 적고 closeout의 "리뷰 질문"으로 올린다.
 
-**`HANDOFF.md`는 사용자가 준 사양이다.** 도구가 고치지 않는다. 실측으로 사양과 다른 사실이 나오면 `README.md`에 적고 리뷰 질문으로 올린다.
-
-`.mcp.json`은 Claude 소유지만 여기 등록된 서버가 Codex 호출 방식을 바꾼다. 서버를 추가하거나 제거하는 변경은 리뷰 질문으로 남긴다.
-
-같은 파일을 두 도구가 동시에 수정하지 않는다.
+**`logs/`는 누구의 소유도 아니다.** 사람이 카메라 앞에 앉은 시간이 들어 있어 다시 만들 수 없다. 지우거나 덮어쓰려면 사용자 승인을 받는다. 예외는 `refs.csv`로, 손으로 입력한 대조값이라 `verify.py`로 재입력할 수 있다. 그래도 승인은 받는다.

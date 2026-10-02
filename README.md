@@ -15,6 +15,7 @@
 | opencv-python | 5.0.0.93 | Apache-2.0 |
 | mediapipe | 1.0.1 | Apache-2.0 |
 | matplotlib | 3.11.1 | PSF 계열 (검증 스크립트 전용, 런타임 아님) |
+| pillow | 12.3.0 | MIT-CMU (`rppg_poc.py`의 한글 안내 문구 렌더링. **런타임 의존성이다**) |
 
 ### 설치
 
@@ -37,26 +38,29 @@ curl -sSL -o models/face_landmarker.task https://storage.googleapis.com/mediapip
 | `test_pipeline.py` | 합성 신호로 Stage 3~5 검증. 웹캠 없이 실행 가능 |
 | `camera_test.py` | 카메라 설정별 신호 품질 비교 |
 | `verify.py` | 세션 로그와 Apple Watch 값을 짝지어 Bland-Altman 플롯 생성 |
+| `stats.py` | `logs/`에서 이 문서의 실측 표를 markdown으로 생성. **문서의 숫자는 이 출력을 붙인 것이다** |
 | `logs/` | 세션 CSV, 카메라 실험 결과, 대조값, 플롯 |
 
 ## 하네스
 
-Claude Code가 구현하고 Codex가 리뷰·커밋 계획을 맡는 구조를 `healthviewer-demo-api`에서 옮겨왔다. 규칙 문서는 아래와 같다.
+Claude Code가 구현, 검증, 문서를 전부 맡는다. 외부 리뷰어는 없다. 통제는 사용자 승인 하나다.
 
 | 파일 | 내용 |
 |---|---|
 | `HANDOFF.md` | 프로젝트 사양. 목적, 파이프라인, 게이트, 범위 밖 항목. **사용자 소유이며 도구가 고치지 않는다** |
 | `CLAUDE.md` | Claude 규칙. 작업 등급, 검증 명령, 커밋 게이트, 파일 소유 |
-| `AGENTS.md` | Codex 규칙. 리뷰 기준, 커밋 계획 계약 |
-| `.claude/skills/round/SKILL.md` | 구현 → 검증 → Codex 리뷰 → 수정 라운드 절차. 상한 2라운드 |
 | `.claude/agents/capture-verifier.md` | 웹캠 실측 전문 에이전트 |
-| `.codex/agents/*.toml` | Codex 리뷰어·커밋 계획자 정의 |
+| `.claude/output-styles/caveman-ponytail.md` | 답변 문체와 최소 구현 원칙 |
 
-**Codex를 호출하려면 이 저장소가 전역 `~/.codex/config.toml`에 신뢰 등록되어 있어야 한다.** 등록 전에는 전역 설정 모델로 떨어져 400으로 죽는다. 저장소 디렉터리에서 `codex`를 대화형으로 한 번 실행하면 신뢰 여부를 묻고 등록된다.
+2026-10-02에 Codex 리뷰 하네스를 걷어냈다. `AGENTS.md`, `.codex/`, `round` 스킬, `.mcp.json`이 그때 삭제됐고 커밋 게이트는 사용자 승인 하나로 바뀌었다.
+
+**리뷰어가 사라진 자리는 `stats.py`가 메운다.** Codex가 실제로 잡은 결함 7건 중 5건이 CSV 수치를 손으로 이 문서에 옮기다 생긴 오류였다. 그래서 실측 표의 숫자는 손으로 쓰지 않고 `stats.py` 출력을 붙인다.
 
 ```bash
-codex
+.venv/Scripts/python.exe stats.py
 ```
+
+세션이 추가되면 표 일부만 고치지 않고 전체를 다시 생성해 교체한다. 분모가 함께 바뀌기 때문이다. 무효 세션 판정은 `stats.py`의 `INVALID_SESSIONS` 상수에 있다. 조건 설명과 해석만 손으로 쓴다.
 
 ## 실행
 
@@ -98,6 +102,23 @@ Stage 3  pos                  POS (Wang et al. 2016), 1.6초 윈도우 overlap-a
 Stage 4  postprocess          선형 디트렌드 → Butterworth 4차 0.7~4.0Hz filtfilt
 Stage 5  estimate_bpm         Welch PSD (nfft 8192) → 대역 내 최대 피크 → BPM, SNR
 ```
+
+### 화면 안내 문구
+
+키오스크에서 근로자가 측정 시간만큼 서 있도록 유도하려면 화면에 진행 상태가 보여야 한다. `rppg_poc.py`가 창 중앙에 한글 안내 문구와 진행 바를 그린다. 상태는 넷이다.
+
+| 조건 | 문구 | 색 |
+|---|---|---|
+| 얼굴 미검출 | 화면을 바라봐 주세요 | 주황 |
+| 버퍼 채우는 중 | 측정 중입니다 | 흰색 |
+| 버퍼는 찼으나 SNR 미달 | 잠시만 기다려 주세요 | 노랑 |
+| SNR 통과 | 측정이 완료되었습니다 | 초록 |
+
+진행 바는 버퍼 채움 비율(`filled / BUFFER_SEC`)이다. `MIN_SEC`(12초)를 넘기면 BPM이 먼저 뜨고 바는 30초까지 계속 찬다.
+
+한글 렌더링은 Pillow와 `FONT_PATH`(`C:/Windows/Fonts/malgun.ttf`)를 쓴다. `cv2.putText`는 한글을 그리지 못한다. 폰트 파일이 없으면 Pillow 기본 폰트로 떨어지며 한글이 깨진다. 다른 OS에서 돌릴 때는 `FONT_PATH`를 바꾼다. 문구 이미지는 `lru_cache`로 캐시하므로 프레임마다 다시 그리지 않는다.
+
+**이 오버레이는 신호 처리 경로를 건드리지 않는다.** 표시 전용이며 CSV 기록과 BPM 계산에 영향이 없다.
 
 POS 투영은 `S1 = Cn_g - Cn_b`, `S2 = Cn_g + Cn_b - 2*Cn_r`, `h = S1 + (std(S1)/std(S2))*S2`이고 윈도우마다 평균을 뺀 뒤 누적한다.
 
@@ -177,14 +198,20 @@ SNR은 대역(0.7~4.0Hz) 안에서 피크 주파수와 그 2배 하모닉 주변
 
 **분포가 완전히 갈리지는 않는다.** 얼굴 세션 10개 중 9개는 SNR 최대가 3.04 dB 이상이지만, 자세가 나빴던 `rest_indoor_paired1` ②는 최대 0.43 dB로 사진 세션 최대(1.65)보다도 낮다. 임계값으로 그 세션은 사진과 구별되지 않는다.
 
-| 임계값 | `photo_attack_alone` (유효) | `photo_attack_still2` (무효) | 얼굴 통과 |
-|---|---|---|---|
-| 1.5 dB | 1/26 | 0/15 | 313/594 |
-| **2.0 dB** | **0/26** | **0/15** | **280/594** |
-| 2.5 dB | 0/26 | 0/15 | 230/594 |
-| 3.0 dB | 0/26 | 0/15 | 186/594 |
+아래 표는 `stats.py` 출력이다.
 
-무효 세션 `photo_attack_still2`는 참고로만 실었다. 프레임에 실제 얼굴이 있었으므로 사진 공격 증거가 아니다. 임계값 판단에서 제외한다.
+| 임계값 | 유효 사진 통과 | 무효 사진 통과 | 얼굴 통과 |
+|---|---|---|---|
+| 1.5 dB | 1/26 | 49/69 | 313/594 |
+| 2.0 dB | 0/26 | 48/69 | 280/594 |
+| 2.5 dB | 0/26 | 32/69 | 230/594 |
+| 3.0 dB | 0/26 | 27/69 | 186/594 |
+
+유효 사진은 `photo_attack_alone` 26샘플 하나다. 무효 사진 69샘플은 `photo_attack_screen` 54개와 `photo_attack_still2` 15개를 합친 것이고 **임계값 판단에서 제외한다.** 둘 다 프레임에 실제 얼굴이 함께 들어와 있었다.
+
+무효 쪽이 2.0 dB에서 48/69로 통과하는 것이 그 증거다. 사진이 게이트를 뚫은 것이 아니라 **살아 있는 얼굴을 재고 있었기 때문에** 통과했다. `photo_attack_screen`은 SNR 중앙값 3.00으로 같은 날 실제 얼굴 세션들보다도 깨끗했다.
+
+무효 세션 판정은 `stats.py`의 `INVALID_SESSIONS` 상수에 있다.
 
 2.0 dB가 유효 사진 세션을 전부 차단하는 가장 낮은 0.5 dB 단위 값이다. 사진 최대 1.65 dB 위로 0.35 dB, 자세가 제대로 잡힌 얼굴 세션 중 SNR 최대가 가장 낮은 값(3.04 dB) 아래로 1.04 dB다. 좁다.
 
@@ -192,7 +219,7 @@ SNR은 대역(0.7~4.0Hz) 안에서 피크 주파수와 그 2배 하모닉 주변
 
 **근거가 세션 하나 26샘플이다.** 인쇄 사진, 다른 조명, 다른 카메라에서 다시 재야 한다.
 
-기존 -2.0 dB에서는 유효 사진 세션 `photo_attack_alone` 26샘플이 전부 `valid=1`이었다. 무효 세션 `photo_attack_still2` 15샘플도 전부 통과했다. 게이트가 무력했다.
+기존 -2.0 dB에서는 유효 사진 세션 `photo_attack_alone` 26샘플이 전부 `valid=1`이었다. 게이트가 무력했다.
 
 ### 고SNR 구간에서만 BPM이 모인다
 
