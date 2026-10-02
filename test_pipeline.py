@@ -25,6 +25,23 @@ def test_no_pulse():
     t, rgb = synth(72.0, amp=0.0, noise=0.002, seed=2)
     res = rppg_poc.analyze(t, rgb)
     assert res["snr_db"] < rppg_poc.SNR_MIN_DB, res["snr_db"]
+def test_geom_stats():
+    assert rppg_poc.geom_stats([]) == (0.0, 0.0)
+    still = [(float(i), 320.0, 240.0, 1500.0 + (i % 3)) for i in range(30)]
+    roi_px, motion_px = rppg_poc.geom_stats(still)
+    assert abs(roi_px - 1501.0) < 1.5, roi_px
+    assert motion_px < 1e-9, motion_px
+    rng = np.random.default_rng(4)
+    shaky = [(float(i), 320.0 + rng.normal(0.0, 8.0), 240.0 + rng.normal(0.0, 6.0), 1500.0) for i in range(300)]
+    roi_px2, motion_px2 = rppg_poc.geom_stats(shaky)
+    assert abs(roi_px2 - 1500.0) < 1e-9, roi_px2
+    assert 8.0 < motion_px2 < 12.0, motion_px2
+    assert rppg_poc.geom_stats([(0.0, 10.0, 20.0, 900.0)]) == (900.0, 0.0)
+def test_roi_polygon_centroid_shape():
+    polys = [np.array([[[0, 0]], [[10, 0]], [[10, 10]], [[0, 10]]], dtype=np.int32)] * 3
+    pts = np.concatenate(polys, axis=0).reshape(-1, 2)
+    assert pts.shape == (12, 2), pts.shape
+    assert abs(float(pts[:, 0].mean()) - 5.0) < 1e-9
 def test_jittered_timestamps():
     rng = np.random.default_rng(3)
     t, rgb = synth(66.0)
@@ -37,4 +54,6 @@ if __name__ == "__main__":
     test_noisy()
     test_no_pulse()
     test_jittered_timestamps()
+    test_geom_stats()
+    test_roi_polygon_centroid_shape()
     print("pipeline ok")

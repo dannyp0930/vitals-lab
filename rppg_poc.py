@@ -212,16 +212,24 @@ def draw_progress(frame, ratio, x, y, w, h, color_bgr):
     fill = int(w * min(1.0, max(0.0, ratio)))
     if fill > 0:
         cv2.rectangle(frame, (x, y), (x + fill, y + h), color_bgr, -1)
+def geom_stats(geom):
+    if not geom:
+        return 0.0, 0.0
+    g = np.asarray(geom, dtype=np.float64)
+    roi_px = float(np.median(g[:, 3]))
+    motion_px = float(np.hypot(g[:, 1].std(), g[:, 2].std())) if len(g) > 1 else 0.0
+    return roi_px, motion_px
 def run(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "session_{}_{}.csv".format(time.strftime("%Y%m%d_%H%M%S"), args.tag))
     log_file = open(log_path, "w", newline="", encoding="utf-8")
     writer = csv.writer(log_file)
-    writer.writerow(["timestamp", "elapsed_s", "bpm", "snr_db", "fps", "valid", "tag"])
+    writer.writerow(["timestamp", "elapsed_s", "bpm", "snr_db", "fps", "roi_px", "motion_px", "valid", "tag"])
     cap = open_camera(args.cam, args.width, args.height, args.fps, args.fourcc, auto=not args.no_auto)
     print(camera_report(cap))
     landmarker = make_landmarker()
     buf = deque()
+    geom = deque()
     t0 = time.time()
     last_update = 0.0
     state = {"bpm": None, "snr_db": None, "fps": 0.0, "wave": None}
@@ -237,12 +245,16 @@ def run(args):
             face_ok = lms is not None
             if face_ok:
                 polys = roi_polygons(lms, frame.shape[1], frame.shape[0])
-                mean_rgb, _ = roi_mean_rgb(frame, polys)
+                mean_rgb, roi_n = roi_mean_rgb(frame, polys)
                 cv2.polylines(frame, polys, True, (0, 200, 255), 1)
                 if mean_rgb is not None:
                     buf.append((now, mean_rgb[0], mean_rgb[1], mean_rgb[2]))
+                    pts = np.concatenate(polys, axis=0).reshape(-1, 2)
+                    geom.append((now, float(pts[:, 0].mean()), float(pts[:, 1].mean()), float(roi_n)))
             while buf and now - buf[0][0] > BUFFER_SEC:
                 buf.popleft()
+            while geom and now - geom[0][0] > BUFFER_SEC:
+                geom.popleft()
             filled = (buf[-1][0] - buf[0][0]) if len(buf) > 1 else 0.0
             if filled >= MIN_SEC and now - last_update >= UPDATE_SEC:
                 last_update = now
@@ -251,12 +263,15 @@ def run(args):
                 if res is not None:
                     state.update(res)
                     valid = res["snr_db"] >= args.snr_min
+                    roi_px, motion_px = geom_stats(geom)
                     writer.writerow([
                         "{:.3f}".format(now),
                         "{:.2f}".format(now - t0),
                         "{:.2f}".format(res["bpm"]),
                         "{:.2f}".format(res["snr_db"]),
                         "{:.2f}".format(res["fps"]),
+                        "{:.0f}".format(roi_px),
+                        "{:.2f}".format(motion_px),
                         int(valid),
                         args.tag,
                     ])

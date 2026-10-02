@@ -24,6 +24,9 @@ def load_sessions(log_dir):
         snr = [float(r["snr_db"]) for r in rows]
         fps = [float(r["fps"]) for r in rows]
         hi = [float(r["bpm"]) for r in rows if float(r["snr_db"]) >= HI_SNR]
+        has_geom = "roi_px" in rows[0] and "motion_px" in rows[0]
+        roi = [float(r["roi_px"]) for r in rows] if has_geom else []
+        motion = [float(r["motion_px"]) for r in rows] if has_geom else []
         q = st.quantiles(bpm, n=4) if len(bpm) > 3 else [min(bpm), st.median(bpm), max(bpm)]
         out.append({
             "file": name,
@@ -46,6 +49,8 @@ def load_sessions(log_dir):
             "snr_min": min(snr),
             "snr_max": max(snr),
             "snr": snr,
+            "roi": roi,
+            "motion": motion,
             "fps_med": st.median(fps),
             "hi_n": len(hi),
             "hi_med": st.median(hi) if hi else None,
@@ -91,6 +96,20 @@ def hisnr_table(sessions):
             continue
         lines.append("| `{}` | {}/{} | {} |".format(
             s["tag"], s["hi_n"], s["n"], "{:.1f}".format(s["hi_med"]) if s["hi_med"] is not None else "none"))
+    return lines
+def diag_table(sessions):
+    have = [s for s in sessions if not s["empty"] and s["roi"]]
+    if not have:
+        return ["roi_px / motion_px 열이 있는 세션이 없다. 해당 열은 2026-10-02 이후 세션부터 기록된다"]
+    lines = ["| 태그 | 구간 | 샘플 | roi_px 중앙 | motion_px 중앙 |", "|---|---|---|---|---|"]
+    for s in have:
+        for label, want in (("SNR >= {:.1f}".format(HI_SNR), True), ("SNR < {:.1f}".format(HI_SNR), False)):
+            sel = [i for i, x in enumerate(s["snr"]) if (x >= HI_SNR) == want]
+            if not sel:
+                continue
+            lines.append("| `{}` | {} | {} | {:.0f} | {:.2f} |".format(
+                s["tag"], label, len(sel),
+                st.median([s["roi"][i] for i in sel]), st.median([s["motion"][i] for i in sel])))
     return lines
 def length_line(sessions):
     parts = ["`{}` {:.1f}초".format(s["tag"], s["last_elapsed"]) for s in sessions if not s["empty"]]
@@ -152,6 +171,7 @@ def main():
         ("세션 길이", length_line(sessions)),
         ("SNR 임계값", threshold_table(sessions)),
         ("고SNR 구간 BPM", hisnr_table(sessions)),
+        ("ROI 크기와 움직임", diag_table(sessions)),
         ("대조", refs_table(sessions, args.logs)),
         ("camera_test", camera_table(args.logs)),
     ]
