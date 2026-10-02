@@ -3,8 +3,10 @@ import csv
 import os
 import time
 from collections import deque
+from functools import lru_cache
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
@@ -31,6 +33,20 @@ SKIN_CR = (133, 173)
 SKIN_CB = (77, 127)
 MIN_ROI_PIXELS = 200
 WAVE_SAMPLES = 300
+FONT_PATH = "C:/Windows/Fonts/malgun.ttf"
+MSG_FONT_SIZE = 34
+MSG_Y = 215
+BAR_X = 40
+BAR_H = 18
+BAR_GAP = 14
+MSG_NO_FACE = "화면을 바라봐 주세요"
+MSG_MEASURING = "측정 중입니다"
+MSG_WAIT = "잠시만 기다려 주세요"
+MSG_DONE = "측정이 완료되었습니다"
+COLOR_NO_FACE = (60, 160, 255)
+COLOR_MEASURING = (255, 255, 255)
+COLOR_WAIT = (0, 200, 255)
+COLOR_DONE = (0, 220, 0)
 FOREHEAD_IDX = [10, 67, 69, 104, 108, 109, 151, 297, 299, 333, 338, 337, 336, 9, 107, 66]
 LEFT_CHEEK_IDX = [50, 101, 118, 117, 123, 116, 111, 205, 187, 207, 206, 203, 36]
 RIGHT_CHEEK_IDX = [280, 330, 347, 346, 352, 345, 340, 425, 411, 427, 426, 423, 266]
@@ -175,6 +191,27 @@ def draw_wave(frame, wave, x, y, w, h):
     ys = (y + h - norm * h).astype(np.int32)
     cv2.polylines(frame, [np.stack([xs, ys], axis=1)], False, (0, 255, 0), 1)
     cv2.rectangle(frame, (x, y), (x + w, y + h), (80, 80, 80), 1)
+@lru_cache(maxsize=16)
+def text_image(text, size, color_bgr):
+    font = ImageFont.truetype(FONT_PATH, size) if os.path.exists(FONT_PATH) else ImageFont.load_default()
+    box = font.getbbox(text)
+    img = Image.new("RGBA", (box[2] - box[0] + 4, box[3] - box[1] + 4), (0, 0, 0, 0))
+    ImageDraw.Draw(img).text((2 - box[0], 2 - box[1]), text, font=font, fill=(color_bgr[2], color_bgr[1], color_bgr[0], 255))
+    arr = np.array(img)
+    return cv2.cvtColor(arr[:, :, :3], cv2.COLOR_RGB2BGR), arr[:, :, 3:4].astype(np.float32) / 255.0
+def draw_message(frame, text, size, color_bgr, y):
+    bgr, alpha = text_image(text, size, color_bgr)
+    h, w = bgr.shape[:2]
+    x = (frame.shape[1] - w) // 2
+    if x < 0 or y < 0 or x + w > frame.shape[1] or y + h > frame.shape[0]:
+        return
+    roi = frame[y:y + h, x:x + w].astype(np.float32)
+    frame[y:y + h, x:x + w] = (roi * (1.0 - alpha) + bgr.astype(np.float32) * alpha).astype(np.uint8)
+def draw_progress(frame, ratio, x, y, w, h, color_bgr):
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (90, 90, 90), 1)
+    fill = int(w * min(1.0, max(0.0, ratio)))
+    if fill > 0:
+        cv2.rectangle(frame, (x, y), (x + fill, y + h), color_bgr, -1)
 def run(args):
     os.makedirs(LOG_DIR, exist_ok=True)
     log_path = os.path.join(LOG_DIR, "session_{}_{}.csv".format(time.strftime("%Y%m%d_%H%M%S"), args.tag))
@@ -233,6 +270,16 @@ def run(args):
             status = "fps {:.1f}  buf {:.0f}/{:.0f}s  face {}  tag {}".format(state["fps"], filled, BUFFER_SEC, "Y" if face_ok else "N", args.tag)
             cv2.putText(frame, status, (12, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1)
             draw_wave(frame, state["wave"], 12, 110, frame.shape[1] - 24, 90)
+            if not face_ok:
+                msg, msg_color = MSG_NO_FACE, COLOR_NO_FACE
+            elif valid:
+                msg, msg_color = MSG_DONE, COLOR_DONE
+            elif filled >= BUFFER_SEC:
+                msg, msg_color = MSG_WAIT, COLOR_WAIT
+            else:
+                msg, msg_color = MSG_MEASURING, COLOR_MEASURING
+            draw_message(frame, msg, MSG_FONT_SIZE, msg_color, MSG_Y)
+            draw_progress(frame, filled / BUFFER_SEC, BAR_X, MSG_Y + MSG_FONT_SIZE + BAR_GAP, frame.shape[1] - 2 * BAR_X, BAR_H, msg_color)
             cv2.imshow("rppg_poc", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
